@@ -1,0 +1,27 @@
+# Cortex Configuration
+# Copy this to config.yaml and fill in your values:
+#   cp config.example.yaml config.yaml
+#
+# config.yaml is gitignored (it contains your database password)
+
+vault_path: ~/notes
+neon_connection_string: postgresql://username:password@ep-xxx.us-east-2.aws.neon.tech/neondb?sslmode=require
+
+git:
+  auto_commit: true       # commit after every file create/edit
+  auto_push: true         # push after every commit
+  commit_prefix: "cortex:" # prefix for auto-generated commit messages
+  remote: origin
+  branch: main
+
+schema:
+  # Add custom frontmatter fields here. Run cortex_migrate.py after adding.
+  extensions: []
+  # Example:
+  # extensions:
+  #   - name: client
+  #     type: text
+  #     default: null
+  #   - name: due_date
+  #     type: date
+  #     default: null

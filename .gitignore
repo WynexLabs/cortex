@@ -1,0 +1,13 @@
+# Cortex config contains database credentials
+.cortex/config.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
