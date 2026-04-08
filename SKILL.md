@@ -101,16 +101,24 @@ Every `.md` file managed by Cortex has a YAML frontmatter block:
 ```yaml
 ---
 title: "Human-readable title"
-type: note           # note | project | prompt | reference | log
-status: active       # active | archived | draft
+type: spec           # open-ended — use whatever fits: spec, analysis, contact, outreach,
+                     # checklist, log, review, decision, roadmap, reference, project, etc.
+status: active       # active | done | ready | planned | draft | waiting | archived
 tags: []             # freeform list, 3-5 tags max
-priority: normal     # low | normal | high | critical
+priority: P1         # P0 (must ship now) | P1 (current sprint) | P2 (next) | P3 (future)
+                     # omit priority if not relevant (contacts, logs, references, etc.)
 created: 2026-04-08
 updated: 2026-04-08
 ---
 ```
 
 These fields cover the most common filtering needs. Users can add custom fields (like `client`, `sprint`, `due_date`) through `schema.extensions` in the config — the migrate script adds corresponding Postgres columns.
+
+**`type` is fully open-ended** — any string is accepted and stored as-is. Use whatever is meaningful for your vault's taxonomy. Cortex will never overwrite or normalise it.
+
+**`status`** has a soft-validated set. Values outside `active | done | ready | planned | draft | waiting | archived` are stored as-is with a warning so you can decide how to handle them.
+
+**`priority`** uses `P0 | P1 | P2 | P3`. Omit it entirely for notes where priority is not meaningful (contacts, references, logs). Unrecognised values are stored with a warning, never overwritten.
 
 ### Frontmatter Discipline
 

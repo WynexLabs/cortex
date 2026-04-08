@@ -25,10 +25,11 @@ TABLE_NAME = "cortex_notes"
 # Allowed column types for schema extensions (whitelist)
 ALLOWED_COLUMN_TYPES = {"TEXT", "INTEGER", "DATE", "BOOLEAN", "FLOAT", "TIMESTAMP"}
 
-# Valid enum values for default fields
-VALID_TYPES = {"note", "project", "prompt", "reference", "log"}
-VALID_STATUSES = {"active", "archived", "draft"}
-VALID_PRIORITIES = {"low", "normal", "high", "critical"}
+# type is fully open-ended — any string is accepted, no validation or auto-repair
+# status and priority use a soft-validated set: unrecognised values produce a
+# warning but are never auto-repaired or overwritten
+VALID_STATUSES = {"active", "done", "ready", "planned", "draft", "waiting", "archived"}
+VALID_PRIORITIES = {"P0", "P1", "P2", "P3"}
 
 
 def validate_identifier(name):
@@ -64,26 +65,19 @@ def validate_frontmatter(frontmatter, auto_repair=True):
     warnings = []
     fm = dict(frontmatter)
 
-    if fm.get("type") and fm["type"] not in VALID_TYPES:
-        if auto_repair:
-            warnings.append(f"Invalid type '{fm['type']}', defaulting to 'note'")
-            fm["type"] = "note"
-        else:
-            warnings.append(f"Invalid type '{fm['type']}' (valid: {VALID_TYPES})")
+    # type is open-ended — any string value is accepted without validation
 
     if fm.get("status") and fm["status"] not in VALID_STATUSES:
-        if auto_repair:
-            warnings.append(f"Invalid status '{fm['status']}', defaulting to 'active'")
-            fm["status"] = "active"
-        else:
-            warnings.append(f"Invalid status '{fm['status']}' (valid: {VALID_STATUSES})")
+        warnings.append(
+            f"Unrecognised status '{fm['status']}' "
+            f"(known: {', '.join(sorted(VALID_STATUSES))}); keeping as-is"
+        )
 
     if fm.get("priority") and fm["priority"] not in VALID_PRIORITIES:
-        if auto_repair:
-            warnings.append(f"Invalid priority '{fm['priority']}', defaulting to 'normal'")
-            fm["priority"] = "normal"
-        else:
-            warnings.append(f"Invalid priority '{fm['priority']}' (valid: {VALID_PRIORITIES})")
+        warnings.append(
+            f"Unrecognised priority '{fm['priority']}' "
+            f"(known: {', '.join(sorted(VALID_PRIORITIES))}); keeping as-is"
+        )
 
     today = date.today().isoformat()
     if not fm.get("created"):
@@ -280,10 +274,10 @@ def upsert_note(conn, file_path, frontmatter, config):
     values = {
         "file_path": rel_path,
         "title": fm.get("title", Path(file_path).stem),
-        "type": fm.get("type", "note"),
-        "status": fm.get("status", "active"),
+        "type": fm.get("type"),
+        "status": fm.get("status"),
         "tags": fm.get("tags", []),
-        "priority": fm.get("priority", "normal"),
+        "priority": fm.get("priority"),
         "created": fm.get("created", date.today().isoformat()),
         "updated": fm.get("updated", date.today().isoformat()),
         "content_preview": fm.get("_content_preview", ""),
@@ -357,10 +351,10 @@ def local_query(vault_path, search=None, type_filter=None, status_filter=None,
         results.append({
             "file_path": rel_path,
             "title": fm_v.get("title", f.stem),
-            "type": fm_v.get("type", "note"),
-            "status": fm_v.get("status", "active"),
+            "type": fm_v.get("type"),
+            "status": fm_v.get("status"),
             "tags": fm_v.get("tags", []),
-            "priority": fm_v.get("priority", "normal"),
+            "priority": fm_v.get("priority"),
             "created": fm_v.get("created"),
             "updated": fm_v.get("updated"),
             "content_preview": fm_v.get("_content_preview", ""),
