@@ -135,6 +135,44 @@ Pulls latest from GitHub, reindexes to Neon. Works from either machine.
 
 Claude queries the index, proposes a mapping, and normalizes across your entire vault.
 
+**Auto-capture sessions:**
+
+Enable the Stop hook and every Claude Code session is automatically captured as a `type: log` note — topics, files touched, commands run, original request, and final outcome. No manual step required. See [Auto-Capture](#auto-capture-stop-hook) below.
+
+## Auto-Capture (Stop Hook)
+
+Cortex can silently log every Claude Code session to your vault. Enable it once and never think about it again.
+
+Add this to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.2.0/scripts/cortex_autosave.py"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+When a session ends, `cortex_autosave.py` reads the transcript, skips trivial sessions (small talk, fewer than 3 turns), and creates a `type: log` note at `logs/YYYY-MM-DD-session-<id>.md` with:
+
+- Topics discussed
+- Files referenced
+- Commands run
+- Original user request
+- Final assistant response
+
+The note is synced to Neon and pushed to GitHub automatically via `cortex_sync.py`. Everything runs locally — no LLM calls, no network latency. The script always exits 0, so it can never block or crash Claude Code.
+
 ## Architecture
 
 ```
@@ -157,6 +195,40 @@ Claude queries the index, proposes a mapping, and normalizes across your entire 
 └─────────────────────────────────────────────┘
 ```
 
+## Auto-Capture (Stop Hook)
+
+Cortex can silently log every Claude Code session to your vault. Enable it once and never think about it again.
+
+Add this to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.2.0/scripts/cortex_autosave.py"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+When a session ends, `cortex_autosave.py` reads the transcript, skips trivial sessions (small talk, fewer than 3 turns), and creates a `type: log` note at `logs/YYYY-MM-DD-session-<id>.md` with:
+
+- Topics discussed
+- Files referenced
+- Commands run
+- Original user request
+- Final assistant response
+
+The note is synced to Neon and pushed to GitHub automatically via `cortex_sync.py`. Everything runs locally — no LLM calls, no network latency. The script always exits 0, so it can never block or crash Claude Code.
+
 ## Scripts
 
 | Script | What it does |
@@ -166,6 +238,7 @@ Claude queries the index, proposes a mapping, and normalizes across your entire 
 | `cortex_query.py` | Queries the index with structured filters |
 | `cortex_reindex.py` | Full rebuild of the index from disk |
 | `cortex_migrate.py` | Adds new columns when you extend the schema |
+| `cortex_autosave.py` | Stop hook — auto-captures session summaries at session end |
 
 All scripts support `--help` and `--dry-run`.
 

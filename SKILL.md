@@ -240,6 +240,75 @@ Queries like "find anything related to how we handle rate limiting" work even if
 
 Setup requires an OpenAI API key (for embeddings) and pgvector enabled on the Neon database (free tier supports it). See `references/vector-setup.md` for instructions.
 
+## Auto-Capture (Stop Hook)
+
+Cortex can automatically save a session summary note every time a Claude Code session ends, with no manual action required. Enable it once and it runs silently in the background.
+
+### How it works
+
+Claude Code fires a `Stop` hook when a session ends. Cortex registers a hook that calls `scripts/cortex_autosave.py`. That script:
+
+1. Reads the session transcript (passed via stdin as JSON by Claude Code)
+2. Skips sessions with fewer than 3 turns or no meaningful content (no file paths, commands, or technical terms)
+3. Extracts: topics discussed, files referenced, commands run, the original request, and the final assistant response
+4. Creates `logs/YYYY-MM-DD-session-<session_id[:8]>.md` in the vault with `type: log` frontmatter
+5. Calls `cortex_sync.py` to upsert the note to Neon and git push
+
+The script always exits 0 and swallows all errors — it will never block or break a Claude Code session.
+
+### Enabling the hook
+
+Add the following to `~/.claude/settings.json` under a `hooks` key:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.2.0/scripts/cortex_autosave.py"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+If `~/.claude/settings.json` already has other content, merge the `hooks` key into the existing object.
+
+The script reads config from the hardcoded path `~/Documents/Obsidian Vault/.cortex/config.yaml` — consistent with the rest of Cortex. If the config is missing or the vault doesn't exist, the script exits silently without writing anything.
+
+### Notes produced
+
+Each auto-captured session creates a note like:
+
+```
+logs/2026-04-09-session-a1b2c3d4.md
+```
+
+With frontmatter:
+
+```yaml
+---
+title: "Session — 2026-04-09 — implement the auth refresh logic"
+type: log
+status: active
+tags: [session, auto-capture]
+created: 2026-04-09
+updated: 2026-04-09
+---
+```
+
+The body contains: session overview (ID, turn count), topics discussed, files referenced, commands run, the original user request, and the final assistant response. All extracted locally without calling any LLM — fast and private.
+
+### Disabling
+
+Remove the `Stop` entry from `~/.claude/settings.json` hooks, or delete the `hooks` key entirely.
+
 ## Script Reference
 
 All scripts live in `scripts/` and read the config file for connection details. Every script supports `--help` and `--dry-run`.
@@ -251,6 +320,7 @@ All scripts live in `scripts/` and read the config file for connection details. 
 | `cortex_query.py` | Query the Neon index with structured filters, return file paths + metadata |
 | `cortex_reindex.py` | Full reindex: rebuild Neon table from all vault files, remove orphans |
 | `cortex_migrate.py` | Add new schema fields to the Postgres table |
+| `cortex_autosave.py` | Stop hook: auto-capture session summary notes at session end |
 
 ## Dependencies
 

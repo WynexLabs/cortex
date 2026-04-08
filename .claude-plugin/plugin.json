@@ -1,5 +1,6 @@
 {
   "name": "cortex",
+  "_version_note": "Keep this version in sync with the latest GitHub release tag (https://github.com/WynexLabs/cortex/releases). Cannot be set dynamically in JSON.",
   "version": "1.2.0",
   "description": "Long-term memory for Claude Code and Open Claw — stores notes as .md files with YAML frontmatter, syncs via GitHub, indexes via Neon Postgres. Progressive setup: works with just files, scales to full cross-machine sync.",
   "author": {
