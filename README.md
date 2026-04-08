@@ -30,7 +30,7 @@ title: "Stripe rate limiting fix"
 type: log
 status: active
 tags: [payments, stripe, bugfix]
-priority: high
+priority: P1
 created: 2026-04-08
 updated: 2026-04-08
 ---
@@ -41,27 +41,40 @@ wasn't backing off properly. Fixed with exponential backoff + jitter.
 
 Cortex indexes these fields in Neon so Claude can query them: "find all active project notes tagged with deployment" returns file paths in milliseconds, then Claude reads only those files.
 
-## Install (one-liner)
+## Install
 
-Paste this into your terminal:
+**Option 1 — one-liner (recommended):**
 
 ```bash
 curl -sL https://raw.githubusercontent.com/wynexlabs/cortex/main/install.sh | bash
 ```
 
-Or clone manually:
+This installs Cortex as a Claude Code plugin and registers it automatically. Run init when it finishes:
 
 ```bash
-git clone https://github.com/wynexlabs/cortex.git ~/.claude/skills/cortex
+python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.2.0/scripts/cortex_init.py
 ```
 
-Then run init:
+**Option 2 — Claude Code marketplace:**
 
-```bash
-python3 ~/.claude/skills/cortex/scripts/cortex_init.py
+Add `wynexlabs` as a marketplace in your `~/.claude/settings.json`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "wynexlabs": {
+      "source": { "source": "github", "repo": "WynexLabs/cortex" }
+    }
+  },
+  "enabledPlugins": {
+    "cortex@wynexlabs": true
+  }
+}
 ```
 
-Or just tell Claude: *"Set up Cortex for my vault"* — it handles the rest.
+Then restart Claude Code — it installs automatically.
+
+**After installing**, just tell Claude: *"Set up Cortex for my vault"* — it handles the rest.
 
 ## Progressive setup — start now, add layers later
 
@@ -152,15 +165,15 @@ All scripts support `--help` and `--dry-run`.
 
 ## Default frontmatter schema
 
-| Field | Type | Default | Purpose |
-|-------|------|---------|---------|
-| `title` | text | filename | Human-readable name |
-| `type` | enum | `note` | `note`, `project`, `prompt`, `reference`, `log` |
-| `status` | enum | `active` | `active`, `archived`, `draft` |
-| `tags` | list | `[]` | Freeform, 3-5 per note |
-| `priority` | enum | `normal` | `low`, `normal`, `high`, `critical` |
-| `created` | date | today | When it was created |
-| `updated` | date | today | Last modified |
+| Field | Values | Purpose |
+|-------|--------|---------|
+| `title` | any string | Human-readable name (defaults to filename) |
+| `type` | any string | Open-ended — `log`, `spec`, `decision`, `reference`, `project`, `contact`, etc. Use whatever fits your taxonomy. |
+| `status` | `active` \| `done` \| `ready` \| `planned` \| `draft` \| `waiting` \| `archived` | Lifecycle state. Unrecognised values are stored with a warning, never overwritten. |
+| `tags` | list | Freeform, 3–5 per note |
+| `priority` | `P0` \| `P1` \| `P2` \| `P3` | P0 = must ship now, P3 = future. Omit entirely for notes where priority isn't meaningful (contacts, logs, references). |
+| `created` | date | Set once on creation, never changed |
+| `updated` | date | Updated on every sync |
 
 Add custom fields (like `client`, `due_date`, `sprint`) through the config. See [setup guide](references/setup-guide.md#adding-custom-fields).
 
