@@ -1,6 +1,12 @@
-# Cortex
+# Cortex — Long-term Memory Plugin for Claude Code & Open Claw
 
-Long-term memory for Claude Code and Open Claw, across machines.
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/WynexLabs/cortex)](https://github.com/WynexLabs/cortex/releases)
+[![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://python.org)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-plugin-blueviolet)](https://github.com/topics/claude-code-plugin)
+[![Open Claw](https://img.shields.io/badge/Open_Claw-compatible-orange)](https://github.com/topics/openclaw)
+
+> A Claude Code plugin that gives your AI persistent, searchable memory across machines. Store notes as markdown with YAML frontmatter, sync via GitHub, query via Neon Postgres, browse in Obsidian.
 
 ---
 
@@ -180,6 +186,20 @@ Add custom fields (like `client`, `due_date`, `sprint`) through the config. See 
 ## Advanced: semantic search
 
 Cortex optionally supports pgvector for querying by meaning, not just metadata. "Find anything about rate limiting" works even if no note is tagged `rate-limiting`. Requires an OpenAI API key for embeddings. Neon's free tier supports pgvector.
+
+## How Cortex compares
+
+| | Cortex | CLAUDE.md | claude-mem | total-recall |
+|---|---|---|---|---|
+| Cross-machine sync | ✓ GitHub | — | — | — |
+| Structured metadata | YAML frontmatter | Freeform | Compressed blobs | Tiered text |
+| Query language | SQL via Neon | None | Semantic only | Keyword |
+| Obsidian-compatible | Native | No | No | No |
+| Semantic search | Optional (pgvector) | No | Yes | No |
+| Works on VPS / Open Claw | ✓ | Local only | Local only | Local only |
+| Zero-dependency start | Level 0 (just files) | Yes | No | No |
+
+---
 
 ## License
 
