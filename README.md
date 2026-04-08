@@ -154,7 +154,7 @@ Add this to `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.2.0/scripts/cortex_autosave.py"
+            "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.3.0/scripts/cortex_autosave.py"
           }
         ]
       }
@@ -210,7 +210,7 @@ Add this to `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.2.0/scripts/cortex_autosave.py"
+            "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.3.0/scripts/cortex_autosave.py"
           }
         ]
       }
