@@ -146,21 +146,65 @@ When the user wants to save something:
 
 ### Querying the Vault
 
-When the user asks Claude to find or recall something:
+When the user asks Claude to find or recall something, pick the right query type:
 
-1. Translate the request into a query. Use the structured flags for clean queries:
-   ```bash
-   python <skill-path>/scripts/cortex_query.py --config <config-path> \
-     --type project --status active --search "authentication" --json
-   ```
+**Metadata filter** — when the user knows what kind of note they want:
+```bash
+python <skill-path>/scripts/cortex_query.py --config <config-path> \
+  --type project --status active --search "authentication" --json
+```
 
-2. Read only the files returned — not the entire vault.
+**Full-text search** — when looking for content, not metadata (Level 3+):
+```bash
+python <skill-path>/scripts/cortex_query.py --config <config-path> \
+  --search-fts "rate limiting stripe"
+```
 
-3. Synthesize the content into an answer or briefing.
+Returns ranked results with HTML-bolded snippets via Postgres `tsvector`.
 
-For natural language queries, translate to the best combination of `--type`, `--status`, `--tag`, `--search`, and `--since` flags. Fall back to `--search` alone if the query is vague.
+**Backlinks / forward links** — when exploring the graph (Level 3+):
+```bash
+python <skill-path>/scripts/cortex_query.py --config <config-path> \
+  --backlinks projects/strata/README.md
+python <skill-path>/scripts/cortex_query.py --config <config-path> \
+  --forward-links infrastructure/openclaw.md
+```
+
+**Section extraction** — when only one part of a long note is needed (Level 3+):
+```bash
+python <skill-path>/scripts/cortex_query.py --config <config-path> \
+  --section infrastructure/openclaw.md "Identity"
+```
+
+Returns just that H2 (and any subsections under it) without the rest of the file. Saves tokens dramatically on large hub notes.
+
+**Dangling links** — when validating the vault (Level 3+):
+```bash
+python <skill-path>/scripts/cortex_query.py --config <config-path> --dangling
+```
+
+Lists all `[[wikilinks]]` whose targets don't resolve. Same data as `cortex_lint.py` produces but cheaper to query.
+
+**Always read only the files returned.** Never load the whole vault. For long notes, prefer `--section` over reading the full file.
+
+For natural language queries, translate to the best combination of flags. If the query mentions a topic without a tag, prefer `--search-fts`. If it asks "what links to X", use `--backlinks`. If it asks "what's in section Y of Z", use `--section`.
 
 **Never use the `--filter` flag with user-provided input.** The `--filter` flag accepts raw SQL and exists only for advanced scripting. For interactive use, always use the structured flags which are parameterized and safe.
+
+### Linting
+
+Before committing significant vault edits, run lint to catch convention violations:
+
+```bash
+python <skill-path>/scripts/cortex_lint.py --config <config-path> --note <path>
+```
+
+Or scan the whole vault:
+```bash
+python <skill-path>/scripts/cortex_lint.py --config <config-path>
+```
+
+Output includes missing summaries, atomic-ceiling violations, dangling wikilinks, pronoun openers at H2 sections, frontmatter validation issues, and heading slug collisions. Warnings only — never blocks indexing.
 
 ### Syncing Between Machines
 
@@ -269,7 +313,7 @@ Add the following to `~/.claude/settings.json` under a `hooks` key:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.3.0/scripts/cortex_autosave.py"
+            "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.4.0/scripts/cortex_autosave.py"
           }
         ]
       }

@@ -63,7 +63,7 @@ def run_reindex(config_path, dry_run=False):
         try:
             fm = parse_frontmatter(md_file)
             if fm:
-                upsert_note(conn, md_file, fm, config)
+                upsert_note(conn, md_file, fm, config, md_files=md_files)
                 indexed += 1
             else:
                 skipped += 1
