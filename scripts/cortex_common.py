@@ -21,9 +21,19 @@ from pathlib import Path
 from datetime import date
 
 TABLE_NAME = "cortex_notes"
+LINKS_TABLE_NAME = "cortex_links"
+HEADINGS_TABLE_NAME = "cortex_headings"
 
 # Allowed column types for schema extensions (whitelist)
 ALLOWED_COLUMN_TYPES = {"TEXT", "INTEGER", "DATE", "BOOLEAN", "FLOAT", "TIMESTAMP"}
+
+# Wikilink pattern: [[target]], [[target|alias]], [[target#section]], [[target#section|alias]]
+WIKILINK_RE = re.compile(r"\[\[([^\]|#\n]+)(?:#[^\]|\n]+)?(?:\|[^\]\n]+)?\]\]")
+# Markdown ATX headings (ignores fenced code blocks — caller responsible for stripping)
+HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+# Slugify: keep alphanum + hyphens, collapse spaces to hyphens
+SLUG_NONALNUM = re.compile(r"[^a-z0-9\-]+")
+SLUG_HYPHENS = re.compile(r"-+")
 
 # type is fully open-ended — any string is accepted, no validation or auto-repair
 # status and priority use a soft-validated set: unrecognised values produce a
@@ -250,10 +260,83 @@ def find_md_files(vault_path):
     return sorted(md_files)
 
 
-def upsert_note(conn, file_path, frontmatter, config):
+def slugify(text):
+    """Obsidian-compatible heading slug: lowercase, hyphens for spaces, alphanum only."""
+    s = text.lower().strip()
+    s = SLUG_NONALNUM.sub("-", s.replace(" ", "-"))
+    s = SLUG_HYPHENS.sub("-", s).strip("-")
+    return s
+
+
+def strip_code_blocks(body):
+    """Remove fenced code blocks so links/headings inside code aren't extracted."""
+    return re.sub(r"```.*?```", "", body, flags=re.DOTALL)
+
+
+def extract_wikilinks(body):
+    """
+    Extract wikilinks from markdown body. Returns list of (target, position).
+    Strips alias and section components — returns target page name only.
+    Skips wikilinks inside fenced code blocks.
+    """
+    cleaned = strip_code_blocks(body)
+    return [(m.group(1).strip(), m.start()) for m in WIKILINK_RE.finditer(cleaned)]
+
+
+def extract_headings(body):
+    """
+    Extract markdown ATX headings. Returns list of (level, text, position).
+    Skips headings inside fenced code blocks.
+    """
+    cleaned = strip_code_blocks(body)
+    results = []
+    for m in HEADING_RE.finditer(cleaned):
+        level = len(m.group(1))
+        text = m.group(2).strip()
+        results.append((level, text, m.start()))
+    return results
+
+
+def resolve_link(target, vault_path, md_files=None):
+    """
+    Resolve a wikilink target to an actual file_path in the vault.
+    Returns (resolved_rel_path, found). Case-insensitive filename match.
+    Optionally accepts a precomputed md_files list to avoid rescanning.
+    """
+    vault_path = Path(vault_path).expanduser()
+    if md_files is None:
+        md_files = find_md_files(vault_path)
+
+    target = target.strip()
+    target_lower = target.lower()
+    target_basename = target_lower.split("/")[-1]
+
+    if not target_basename.endswith(".md"):
+        target_basename_md = target_basename + ".md"
+    else:
+        target_basename_md = target_basename
+        target_basename = target_basename[:-3]
+
+    if "/" in target_lower:
+        for f in md_files:
+            rel = str(f.relative_to(vault_path)).lower()
+            if rel == target_lower or rel == target_lower + ".md":
+                return str(f.relative_to(vault_path)), True
+        # Path-style link must resolve via path; don't fall through to basename
+        return target, False
+
+    for f in md_files:
+        if f.name.lower() == target_basename_md or f.stem.lower() == target_basename:
+            return str(f.relative_to(vault_path)), True
+
+    return target, False
+
+
+def upsert_note(conn, file_path, frontmatter, config, md_files=None):
     """
     Upsert a single note's frontmatter into Neon.
     All identifiers validated, all values parameterized.
+    Also refreshes cortex_links and cortex_headings rows for this note.
     """
     import psycopg2.sql as sql_module
 
@@ -264,8 +347,14 @@ def upsert_note(conn, file_path, frontmatter, config):
     for w in warnings:
         print(f"  Auto-repair ({Path(file_path).name}): {w}")
 
+    body = fm.get("_body", "")
+    aliases = fm.get("aliases") or []
+    if isinstance(aliases, str):
+        aliases = [a.strip() for a in aliases.split(",") if a.strip()]
+
     columns = ["file_path", "title", "type", "status", "tags", "priority",
-               "created", "updated", "content_preview"]
+               "created", "updated", "content_preview", "body", "summary",
+               "aliases", "supersedes"]
 
     extensions = config.get("schema", {}).get("extensions", [])
     for ext in extensions:
@@ -281,6 +370,10 @@ def upsert_note(conn, file_path, frontmatter, config):
         "created": fm.get("created", date.today().isoformat()),
         "updated": fm.get("updated", date.today().isoformat()),
         "content_preview": fm.get("_content_preview", ""),
+        "body": body,
+        "summary": fm.get("summary"),
+        "aliases": aliases,
+        "supersedes": fm.get("supersedes"),
     }
 
     for ext in extensions:
@@ -310,6 +403,81 @@ def upsert_note(conn, file_path, frontmatter, config):
 
     cur = conn.cursor()
     cur.execute(query, values)
+
+    upsert_links(conn, rel_path, body, fm, vault_path, md_files)
+    upsert_headings(conn, rel_path, body)
+
+
+def upsert_links(conn, source_path, body, fm, vault_path, md_files=None):
+    """
+    Replace all cortex_links rows for source_path with freshly extracted ones.
+    Includes wikilinks from body, see-also frontmatter, and supersedes frontmatter.
+    """
+    cur = conn.cursor()
+    cur.execute(f"DELETE FROM {LINKS_TABLE_NAME} WHERE source_path = %s", (source_path,))
+
+    if md_files is None:
+        md_files = find_md_files(vault_path)
+
+    rows = []
+    seen = set()
+
+    for target, pos in extract_wikilinks(body):
+        resolved, found = resolve_link(target, vault_path, md_files)
+        key = (resolved, "wikilink")
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append((source_path, resolved, found, "wikilink", pos))
+
+    see_also = fm.get("see-also") or fm.get("see_also") or []
+    if isinstance(see_also, str):
+        see_also = [see_also]
+    for entry in see_also:
+        target = str(entry).strip().strip("[]")
+        if not target:
+            continue
+        resolved, found = resolve_link(target, vault_path, md_files)
+        key = (resolved, "see_also")
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append((source_path, resolved, found, "see_also", None))
+
+    supersedes = fm.get("supersedes")
+    if supersedes:
+        target = str(supersedes).strip().strip("[]")
+        resolved, found = resolve_link(target, vault_path, md_files)
+        key = (resolved, "supersedes")
+        if key not in seen:
+            rows.append((source_path, resolved, found, "supersedes", None))
+
+    if rows:
+        cur.executemany(
+            f"INSERT INTO {LINKS_TABLE_NAME} "
+            "(source_path, target_path, target_resolved, link_type, position) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            rows,
+        )
+
+
+def upsert_headings(conn, file_path, body):
+    """Replace all cortex_headings rows for file_path with freshly extracted ones."""
+    cur = conn.cursor()
+    cur.execute(f"DELETE FROM {HEADINGS_TABLE_NAME} WHERE file_path = %s", (file_path,))
+
+    headings = extract_headings(body)
+    if not headings:
+        return
+
+    rows = [(file_path, level, text, slugify(text), pos) for level, text, pos in headings]
+    cur.executemany(
+        f"INSERT INTO {HEADINGS_TABLE_NAME} "
+        "(file_path, level, text, anchor, position) "
+        "VALUES (%s, %s, %s, %s, %s) "
+        "ON CONFLICT (file_path, position) DO NOTHING",
+        rows,
+    )
 
 
 def local_query(vault_path, search=None, type_filter=None, status_filter=None,
