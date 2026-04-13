@@ -7,7 +7,7 @@
 set -e
 
 VERSION=$(curl -s "https://api.github.com/repos/WynexLabs/cortex/releases/latest" | grep '"tag_name"' | sed 's/.*"tag_name": *"v\?\([^"]*\)".*/\1/')
-VERSION=${VERSION:-"1.2.0"}
+VERSION=${VERSION:-"1.4.0"}
 REPO="https://github.com/WynexLabs/cortex.git"
 PLUGIN_DIR="${HOME}/.claude/plugins/cache/wynexlabs/cortex/${VERSION}"
 SETTINGS="${HOME}/.claude/settings.json"

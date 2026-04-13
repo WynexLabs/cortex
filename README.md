@@ -1,278 +1,242 @@
-# Cortex — Long-term Memory Plugin for Claude Code & Open Claw
+# Cortex — AI-Prioritized Vault Toolchain for Claude Code
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/WynexLabs/cortex)](https://github.com/WynexLabs/cortex/releases)
 [![Python](https://img.shields.io/badge/python-3.10+-green.svg)](https://python.org)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-plugin-blueviolet)](https://github.com/topics/claude-code-plugin)
-[![Open Claw](https://img.shields.io/badge/Open_Claw-compatible-orange)](https://github.com/topics/openclaw)
 
-> A Claude Code plugin that gives your AI persistent, searchable memory across machines. Store notes as markdown with YAML frontmatter, sync via GitHub, query via Neon Postgres, browse in Obsidian.
+> A Markdown vault optimized for LLM consumption — graph-aware, full-text searchable, semantic when you need it. Works progressively: start with files, add layers as you grow.
 
 ---
 
-If you run Open Claw on a VPS for 24/7 availability but do your dev work on a local machine, you've hit this problem: AI doesn't remember anything between sessions, and your knowledge is stuck on whichever machine you wrote it on.
+## What it solves
 
-Cortex fixes this with two free services you probably already use:
+Three problems every AI-coding workflow eventually hits:
 
-- **GitHub** syncs your markdown files between machines (source of truth)
-- **Neon Postgres** indexes the metadata so Claude can query your vault fast without scanning every file
+1. **Your AI has no memory between sessions.** Every conversation starts from zero.
+2. **Your knowledge is unstructured prose.** Loading the right context burns tokens you didn't budget for.
+3. **You can't search your own notes the way an LLM needs to.** Filename grep doesn't cut it; semantic search alone misses structure.
 
-On your local machine, the vault is just a folder of `.md` files — Obsidian reads it natively. On your VPS, Open Claw reads and writes the same files. Both machines push/pull through GitHub, both query the same Neon database.
+Cortex turns a plain Markdown folder into a graph-aware, full-text-searchable, optionally-semantic knowledge base that an LLM can query precisely — by tag, by link graph, by full text, by section, by similarity. Conventions plus a lint script keep notes clean as the vault grows.
 
-```
-Local Machine ←── GitHub ──→ VPS (Open Claw)
-       ↕                           ↕
-       └────── Neon Postgres ──────┘
-               (shared index)
-```
+## How it works (30 seconds)
 
-## How it works
-
-Every markdown file has YAML frontmatter — structured metadata at the top:
+Notes are Markdown files with YAML frontmatter:
 
 ```yaml
 ---
-title: "Stripe rate limiting fix"
 type: log
 status: active
+summary: One-sentence TLDR so the LLM can decide whether to load the rest.
 tags: [payments, stripe, bugfix]
-priority: P1
-created: 2026-04-08
-updated: 2026-04-08
+created: 2026-04-13
+updated: 2026-04-13
 ---
 
-We were hitting 429s on the Stripe API because our retry logic
-wasn't backing off properly. Fixed with exponential backoff + jitter.
+# Stripe rate limiting fix
+
+Brief problem description, [[stripe-integration]] context, and the resolution.
 ```
 
-Cortex indexes these fields in Neon so Claude can query them: "find all active project notes tagged with deployment" returns file paths in milliseconds, then Claude reads only those files.
+Cortex parses these into a Postgres index that an LLM can query in milliseconds:
+- `--search-fts "rate limiting"` — full-text search across all bodies
+- `--backlinks projects/strata/README.md` — what references this note
+- `--section infrastructure/vps.md "Identity"` — pull just one section
+- `--type spec --status active` — filter by structured metadata
 
-## Install
+The LLM reads only the files it needs, in the right slices. You get cross-session memory and your tokens stay under control.
 
-**Option 1 — one-liner (recommended):**
+## Setup matrix — pick your recipe
+
+Cortex works at every layer. Each row is a valid configuration:
+
+| Setup | Files + Obsidian | + GitHub | + Neon | + Embeddings |
+|---|:---:|:---:|:---:|:---:|
+| **Solo dev, no cloud** | ✓ | | | |
+| **Solo dev with sync** | ✓ | ✓ | | |
+| **Solo dev with fast queries** | ✓ | | ✓ | |
+| **Multi-machine setup with VPS** | ✓ | ✓ | ✓ | optional |
+| **Full power (semantic search)** | ✓ | ✓ | ✓ | ✓ |
+
+Capabilities by level:
+
+| Level | What you add | What unlocks |
+|---|---|---|
+| 0 | Just `.md` files | Local file-scan queries; structured frontmatter from day one |
+| 1 | + Obsidian | Native UI browsing, instant local search |
+| 2 | + GitHub | Cross-machine sync (laptop ↔ VPS, work ↔ home) |
+| 3 | + Neon Postgres | Fast SQL queries, **wikilink graph traversal**, **full-text search**, **section addressing** |
+| 4 | + Embeddings (pgvector) | Semantic search — "find anything about auth" even without that tag |
+
+You can stop at any level. Going up later costs nothing — your existing notes get indexed automatically.
+
+## Quick start (Level 0 — just files)
 
 ```bash
 curl -sL https://raw.githubusercontent.com/wynexlabs/cortex/main/install.sh | bash
 ```
 
-This installs Cortex as a Claude Code plugin and registers it automatically. Run init when it finishes:
+Installs the Cortex Claude Code plugin. Then in Claude Code:
+
+> *"Set up Cortex for my vault."*
+
+That's it. Claude creates `.cortex/config.yaml`, walks you through whatever level fits, and starts saving notes with proper frontmatter.
+
+## Progressive setup
+
+### Level 0 → 1: Add Obsidian
+
+Point [Obsidian](https://obsidian.md) at your vault folder. Notes become browsable with backlinks and a graph view. Free.
+
+### Level 1 → 2: Add GitHub
 
 ```bash
-python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.2.0/scripts/cortex_init.py
+cd ~/your-vault
+git init && git remote add origin git@github.com:you/your-vault.git
 ```
 
-**Option 2 — Claude Code marketplace:**
+Cortex auto-commits and pushes (configurable). Multi-machine sync without conflict drama.
 
-Add `wynexlabs` as a marketplace in your `~/.claude/settings.json`:
+### Level 2 → 3: Add Neon
 
-```json
-{
-  "extraKnownMarketplaces": {
-    "wynexlabs": {
-      "source": { "source": "github", "repo": "WynexLabs/cortex" }
-    }
-  },
-  "enabledPlugins": {
-    "cortex@wynexlabs": true
-  }
-}
+Sign up at [neon.tech](https://neon.tech) (free tier covers most personal use), copy the connection string into `.cortex/config.yaml`, and run:
+
+```bash
+python scripts/cortex_migrate.py --config .cortex/config.yaml
+python scripts/cortex_reindex.py --config .cortex/config.yaml
 ```
 
-Then restart Claude Code — it installs automatically.
+Schema migrates additively. All your existing notes get indexed.
 
-**After installing**, just tell Claude: *"Set up Cortex for my vault"* — it handles the rest.
+### Level 3 → 4: Add embeddings (semantic search)
 
-## Progressive setup — start now, add layers later
+Set an `embedding_provider` and API key in your config. Run reindex once to embed the vault. Queries via `--semantic-search` find notes by meaning, not just keywords. Coming in v1.5.
 
-Cortex doesn't require everything upfront. It works immediately with just a folder, and each service you add unlocks more capability. Your notes are structured from day one — nothing is wasted.
+## Use cases
+
+### Solo developer, single machine
+
+Just files plus Obsidian. Cortex saves notes with structured frontmatter. Claude reads the right files instead of the whole vault. No cloud required.
+
+### Multi-machine setup with VPS
+
+Files + GitHub + Neon. Same notes on your laptop and your VPS, both querying the same Neon index. Push from one, pull from the other.
+
+### Open Claw on VPS + local dev
+
+The original Cortex use case. Run [Open Claw](https://github.com/topics/openclaw) on a VPS for 24/7 availability while you do dev work locally. Both reach the same vault.
 
 ```
-Level 0: Just files      → Notes saved with structured frontmatter
-Level 1: + Obsidian      → Notes browsable and searchable locally
-Level 2: + GitHub        → Notes sync between machines via git
-Level 3: + Neon          → Fast SQL queries across your entire vault
+Local Machine  ←──  GitHub  ──→  VPS (Open Claw)
+       ↕                                ↕
+       └─────────  Neon Postgres  ──────┘
+                  (shared index)
 ```
 
-**Start at Level 0** — just tell Claude *"Save a note about..."* and it creates a `.md` file with proper YAML frontmatter. No accounts needed.
+### CI / agent workflows
 
-**Add Obsidian** whenever you want — point it at your vault folder and your notes are instantly browsable with full search.
+Cortex's CLI is scriptable. Lint as a CI gate, query in pre-commit hooks, bundle context for agent runs. See the [setup guide](references/setup-guide.md).
 
-**Add GitHub** when you need cross-machine sync — `git init`, push to a repo, and your VPS can pull the same files. Open Claw pushes, you pull. Free.
+## Conventions
 
-**Add Neon** when your vault grows and you want fast structured queries — sign up at [neon.tech](https://neon.tech) (free), paste the connection string into your config, and run `cortex_init.py`. Every note you've already written gets indexed automatically.
+A vault built for LLMs benefits from a writing standard. Cortex ships with [10 LLM-first conventions](references/setup-guide.md#conventions) covering required frontmatter (`summary:`, `aliases:`, `see-also:`), atomic note size, wikilink rules, and pronoun avoidance at section openers.
 
-Each step is optional. Each step preserves everything from before. See [references/setup-guide.md](references/setup-guide.md) for the full walkthrough.
+The `cortex_lint.py` script enforces 7 of the 10 mechanically — never modifies files, never blocks indexing, just surfaces warnings:
 
-## What you can do
+```bash
+python scripts/cortex_lint.py --config .cortex/config.yaml
+```
 
-**Save knowledge:**
+The other 3 conventions need human judgment and are documented for self-application.
 
-> "Save a note about how we fixed the auth bug — the session tokens were expiring because the refresh logic had a race condition"
+## Auto-capture (Stop hook)
 
-Claude creates a `.md` file with inferred frontmatter, syncs to Neon, and pushes to GitHub.
-
-**Query across sessions:**
-
-> "What do I have about our deployment pipeline?"
-
-Claude queries Neon, finds matching notes, reads only those files, and gives you a summary.
-
-**Pre-load context:**
-
-> "I'm about to refactor notifications. Pull up everything I've written about the notification system."
-
-Claude searches your vault and builds a briefing before you start.
-
-**Sync between machines:**
-
-> "Sync my vault"
-
-Pulls latest from GitHub, reindexes to Neon. Works from either machine.
-
-**Clean up:**
-
-> "Some of my tags are inconsistent — auth vs authentication vs authn. Help me normalize them."
-
-Claude queries the index, proposes a mapping, and normalizes across your entire vault.
-
-**Auto-capture sessions:**
-
-Enable the Stop hook and every Claude Code session is automatically captured as a `type: log` note — topics, files touched, commands run, original request, and final outcome. No manual step required. See [Auto-Capture](#auto-capture-stop-hook) below.
-
-## Auto-Capture (Stop Hook)
-
-Cortex can silently log every Claude Code session to your vault. Enable it once and never think about it again.
-
-Add this to `~/.claude/settings.json`:
+Cortex can silently log every Claude Code session as a `type: log` note. Add to `~/.claude/settings.json`:
 
 ```json
 {
   "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.3.0/scripts/cortex_autosave.py"
-          }
-        ]
-      }
-    ]
+    "Stop": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.4.0/scripts/cortex_autosave.py"
+      }]
+    }]
   }
 }
 ```
 
-When a session ends, `cortex_autosave.py` reads the transcript, skips trivial sessions (small talk, fewer than 3 turns), and creates a `type: log` note at `logs/YYYY-MM-DD-session-<id>.md` with:
-
-- Topics discussed
-- Files referenced
-- Commands run
-- Original user request
-- Final assistant response
-
-The note is synced to Neon and pushed to GitHub automatically via `cortex_sync.py`. Everything runs locally — no LLM calls, no network latency. The script always exits 0, so it can never block or crash Claude Code.
+Reads the transcript, skips trivial sessions, captures topics/files/commands. Always exits 0 — never blocks Claude Code.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────┐
-│                 Your Vault                   │
-│  .md files with YAML frontmatter            │
-│  (Obsidian-compatible)                       │
+│              Your Markdown Vault             │
+│   .md files with YAML frontmatter           │
+│   (Obsidian-compatible)                      │
 ├──────────────────┬──────────────────────────┤
 │   GitHub Repo    │    Neon Postgres          │
 │   (file sync)    │    (query index)          │
 │                  │                           │
-│   Source of      │    Mirrors frontmatter    │
-│   truth for      │    fields + file paths    │
-│   content        │    for fast SQL queries   │
+│   Source of      │  cortex_notes (metadata,  │
+│   truth          │  body, FTS tsvector)      │
+│                  │  cortex_links (graph)     │
+│                  │  cortex_headings (anchors)│
+│                  │  cortex_embeddings (v1.5) │
 ├──────────────────┴──────────────────────────┤
-│              Both machines                   │
-│   Local: Obsidian + Claude Code              │
-│   VPS:   Open Claw (24/7)                    │
-│   Both push/pull GitHub, both query Neon     │
+│              Any number of machines          │
+│   Each pushes/pulls GitHub, queries Neon     │
 └─────────────────────────────────────────────┘
 ```
-
-## Auto-Capture (Stop Hook)
-
-Cortex can silently log every Claude Code session to your vault. Enable it once and never think about it again.
-
-Add this to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/.claude/plugins/cache/wynexlabs/cortex/1.3.0/scripts/cortex_autosave.py"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-When a session ends, `cortex_autosave.py` reads the transcript, skips trivial sessions (small talk, fewer than 3 turns), and creates a `type: log` note at `logs/YYYY-MM-DD-session-<id>.md` with:
-
-- Topics discussed
-- Files referenced
-- Commands run
-- Original user request
-- Final assistant response
-
-The note is synced to Neon and pushed to GitHub automatically via `cortex_sync.py`. Everything runs locally — no LLM calls, no network latency. The script always exits 0, so it can never block or crash Claude Code.
 
 ## Scripts
 
 | Script | What it does |
 |--------|-------------|
-| `cortex_setup.py` | First-time setup — creates the Postgres table, indexes existing files |
-| `cortex_sync.py` | Syncs frontmatter to Neon + git commit/push |
-| `cortex_query.py` | Queries the index with structured filters |
-| `cortex_reindex.py` | Full rebuild of the index from disk |
-| `cortex_migrate.py` | Adds new columns when you extend the schema |
-| `cortex_autosave.py` | Stop hook — auto-captures session summaries at session end |
+| `cortex_init.py` | Interactive first-time setup |
+| `cortex_setup.py` | Programmatic setup — creates tables, indexes existing files |
+| `cortex_sync.py` | Sync changes to Neon + git commit/push |
+| `cortex_query.py` | Query the index — search, filter, graph, FTS, sections |
+| `cortex_reindex.py` | Full rebuild from disk (idempotent) |
+| `cortex_migrate.py` | Apply schema migrations (core + user extensions) |
+| `cortex_lint.py` | Lint vault against the 10 LLM-first conventions |
+| `cortex_autosave.py` | Stop hook — auto-captures sessions |
 
-All scripts support `--help` and `--dry-run`.
+All scripts support `--help` and `--dry-run` where applicable.
 
 ## Default frontmatter schema
 
 | Field | Values | Purpose |
 |-------|--------|---------|
-| `title` | any string | Human-readable name (defaults to filename) |
-| `type` | any string | Open-ended — `log`, `spec`, `decision`, `reference`, `project`, `contact`, etc. Use whatever fits your taxonomy. |
-| `status` | `active` \| `done` \| `ready` \| `planned` \| `draft` \| `waiting` \| `archived` | Lifecycle state. Unrecognised values are stored with a warning, never overwritten. |
-| `tags` | list | Freeform, 3–5 per note |
-| `priority` | `P0` \| `P1` \| `P2` \| `P3` | P0 = must ship now, P3 = future. Omit entirely for notes where priority isn't meaningful (contacts, logs, references). |
-| `created` | date | Set once on creation, never changed |
-| `updated` | date | Updated on every sync |
+| `summary` | 1–3 sentences | **TLDR — the highest-leverage field for LLM consumption** |
+| `title` | string | Human-readable name (defaults to filename) |
+| `type` | string | Open-ended — `log`, `spec`, `decision`, `reference`, `project`, etc. |
+| `aliases` | list | Disambiguation — `["Strata", "project-strata", "strata-app"]` |
+| `see-also` | list | Explicit related-notes pointers |
+| `status` | `active` \| `done` \| `ready` \| `planned` \| `draft` \| `waiting` \| `archived` | Lifecycle state |
+| `supersedes` | wikilink | Marks this note as replacing another (auto-archives target) |
+| `source` | string | Citation for non-obvious facts |
+| `tags` | list | Freeform |
+| `priority` | `P0`–`P3` | Optional |
+| `created` / `updated` | date | ISO 8601 |
 
-Add custom fields (like `client`, `due_date`, `sprint`) through the config. See [setup guide](references/setup-guide.md#adding-custom-fields).
-
-## Advanced: semantic search
-
-Cortex optionally supports pgvector for querying by meaning, not just metadata. "Find anything about rate limiting" works even if no note is tagged `rate-limiting`. Requires an OpenAI API key for embeddings. Neon's free tier supports pgvector.
+Custom fields via `schema.extensions` in config. See the [setup guide](references/setup-guide.md#adding-custom-fields).
 
 ## How Cortex compares
 
 | | Cortex | CLAUDE.md | claude-mem | total-recall |
 |---|---|---|---|---|
-| Cross-machine sync | ✓ GitHub | — | — | — |
+| Wikilink graph traversal | ✓ | — | — | — |
+| Full-text search | ✓ (Postgres tsvector) | — | — | — |
+| Section-level addressing | ✓ | — | — | — |
+| Cross-machine sync | ✓ (GitHub) | — | — | — |
 | Structured metadata | YAML frontmatter | Freeform | Compressed blobs | Tiered text |
-| Query language | SQL via Neon | None | Semantic only | Keyword |
 | Obsidian-compatible | Native | No | No | No |
-| Semantic search | Optional (pgvector) | No | Yes | No |
-| Works on VPS / Open Claw | ✓ | Local only | Local only | Local only |
+| Semantic search | ✓ (v1.5, pgvector) | No | ✓ | No |
+| Lint script for conventions | ✓ | — | — | — |
 | Zero-dependency start | Level 0 (just files) | Yes | No | No |
-
----
 
 ## License
 
