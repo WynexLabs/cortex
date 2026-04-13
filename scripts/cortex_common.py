@@ -273,27 +273,49 @@ def strip_code_blocks(body):
     return re.sub(r"```.*?```", "", body, flags=re.DOTALL)
 
 
+def _iter_non_code_lines(body):
+    """Yield (line_text, char_offset) for each line outside fenced code blocks."""
+    in_fence = False
+    offset = 0
+    for line in body.split("\n"):
+        stripped = line.lstrip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            offset += len(line) + 1
+            continue
+        if not in_fence:
+            yield line, offset
+        offset += len(line) + 1
+
+
 def extract_wikilinks(body):
     """
     Extract wikilinks from markdown body. Returns list of (target, position).
     Strips alias and section components — returns target page name only.
-    Skips wikilinks inside fenced code blocks.
+    Skips wikilinks inside fenced code blocks. Positions are offsets in the
+    raw body (matching what is stored in cortex_notes.body).
     """
-    cleaned = strip_code_blocks(body)
-    return [(m.group(1).strip(), m.start()) for m in WIKILINK_RE.finditer(cleaned)]
+    results = []
+    for line, offset in _iter_non_code_lines(body):
+        for m in WIKILINK_RE.finditer(line):
+            results.append((m.group(1).strip(), offset + m.start()))
+    return results
 
 
 def extract_headings(body):
     """
     Extract markdown ATX headings. Returns list of (level, text, position).
-    Skips headings inside fenced code blocks.
+    Skips headings inside fenced code blocks. Positions are offsets in the
+    raw body (matching what is stored in cortex_notes.body).
     """
-    cleaned = strip_code_blocks(body)
+    heading_line_re = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
     results = []
-    for m in HEADING_RE.finditer(cleaned):
-        level = len(m.group(1))
-        text = m.group(2).strip()
-        results.append((level, text, m.start()))
+    for line, offset in _iter_non_code_lines(body):
+        m = heading_line_re.match(line)
+        if m:
+            level = len(m.group(1))
+            text = m.group(2).strip()
+            results.append((level, text, offset))
     return results
 
 
