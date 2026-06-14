@@ -17,6 +17,7 @@ Usage:
 """
 
 import argparse
+import datetime
 import json
 import re
 import sys
@@ -41,6 +42,14 @@ LONG_NOTE_WORDS = 500
 # Atomic ceiling — beyond either, propose split
 ATOMIC_MAX_H2 = 3
 ATOMIC_MAX_WORDS = 600
+# Structured/session records — exempt from atomic-ceiling + summary-H2 (those rules target atomic knowledge notes)
+STRUCTURED_TYPES = {"log", "backlog", "spec"}
+
+# --- Item-note (board) schema — local anti-drift enforcement for the vault board
+VALID_STAGES = {"shaping", "approved", "building", "verifying", "gate", "shipped"}
+VALID_KINDS = {"feature", "infra", "bug", "chore"}
+ITEM_REQUIRED = ("stage", "owner", "kind", "sprint", "rank")
+ITEM_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def word_count(text):
@@ -61,10 +70,121 @@ def first_sentence_after_heading(body, heading_position):
     return None
 
 
+def check_item_schema(fm):
+    """Validate a `type: item` board note so its state stays trustworthy.
+
+    The board (Obsidian Bases) and a resuming agent both read this frontmatter
+    as truth — these checks are the local anti-drift layer that stops a typed
+    `stage`/`gate`/`owner` from silently lying.
+    """
+    warnings = []
+
+    for field in ITEM_REQUIRED:
+        val = fm.get(field)
+        if val is None or (isinstance(val, str) and not val.strip()):
+            warnings.append({
+                "rule": "item-missing-field",
+                "severity": "warning",
+                "msg": f"Item missing required `{field}:`",
+            })
+
+    stage = fm.get("stage")
+    if stage and stage not in VALID_STAGES:
+        warnings.append({
+            "rule": "item-unknown-stage",
+            "severity": "warning",
+            "msg": f"Unknown stage '{stage}' (known: {', '.join(sorted(VALID_STAGES))})",
+        })
+
+    kind = fm.get("kind")
+    if kind and kind not in VALID_KINDS:
+        warnings.append({
+            "rule": "item-unknown-kind",
+            "severity": "warning",
+            "msg": f"Unknown kind '{kind}' (known: {', '.join(sorted(VALID_KINDS))})",
+        })
+
+    if stage == "gate" and not fm.get("gate"):
+        warnings.append({
+            "rule": "item-gate-without-reason",
+            "severity": "warning",
+            "msg": "stage is `gate` but `gate:` reason is empty — a gated card must say why",
+        })
+
+    owner = fm.get("owner")
+    if owner is not None and not isinstance(owner, str):
+        warnings.append({
+            "rule": "item-owner-not-single",
+            "severity": "warning",
+            "msg": f"`owner:` must be exactly one holder (got {type(owner).__name__}) "
+                   f"— one writer per item (baton), never a list",
+        })
+
+    deadline = fm.get("deadline")
+    if deadline is not None and str(deadline).strip():
+        ok = isinstance(deadline, datetime.date) or bool(ITEM_DATE_RE.match(str(deadline)))
+        if not ok:
+            warnings.append({
+                "rule": "item-bad-deadline",
+                "severity": "warning",
+                "msg": f"`deadline:` must be a YYYY-MM-DD date (got '{deadline}')",
+            })
+
+    return warnings
+
+
+def check_item_readfirst(body):
+    """The `## Read-first` manifest is THE agent affordance — enforce it exists and is non-empty.
+
+    A resuming agent (or dispatched subagent) loads this list to know what to read.
+    An empty/missing manifest is the keystone hole the 2026-06-14 cold-resume test found.
+    Resolution of any [[wikilinks]] inside it is already covered by Check 4 (dangling-wikilink).
+    """
+    warnings = []
+    m = re.search(r"^##\s+Read-first\s*$", body or "", re.MULTILINE | re.IGNORECASE)
+    if not m:
+        warnings.append({
+            "rule": "item-readfirst-missing",
+            "severity": "warning",
+            "msg": "Item has no `## Read-first` manifest — a resuming agent can't know what to load",
+        })
+        return warnings
+
+    # Section = from after the heading to the next H2 (or EOF)
+    section = body[m.end():]
+    nxt = re.search(r"^##\s+", section, re.MULTILINE)
+    if nxt:
+        section = section[:nxt.start()]
+
+    # A real entry = a bullet whose content isn't just an HTML comment / whitespace
+    has_entry = False
+    for line in section.splitlines():
+        s = line.strip()
+        if not s or s.startswith("<!--") or s.startswith("-->"):
+            continue
+        if s[:1] in ("-", "*"):
+            content = s[1:].strip()
+            if content and not content.startswith("<!--"):
+                has_entry = True
+                break
+    if not has_entry:
+        warnings.append({
+            "rule": "item-readfirst-empty",
+            "severity": "warning",
+            "msg": "`## Read-first` is empty — list the 2-4 notes/files a fresh agent must read first",
+        })
+    return warnings
+
+
 def check_note(note_path, vault_path, md_files):
     """Run all 7 checks on a single note. Returns list of warning dicts."""
     warnings = []
     rel_path = str(note_path.relative_to(vault_path))
+
+    # _claude/templates/ hold scaffolding with {{placeholders}} (invalid YAML by design) — not real notes
+    if rel_path.startswith("_claude/templates/") or rel_path.startswith("_claude\\templates\\"):
+        return warnings
+
     fm = parse_frontmatter(note_path)
 
     if fm is None:
@@ -80,6 +200,7 @@ def check_note(note_path, vault_path, md_files):
     wc = word_count(body)
     headings = extract_headings(body)
     h2s = [(t, p) for lvl, t, p in headings if lvl == 2]
+    note_type = fm.get("type")
 
     # Check 1: Missing summary frontmatter
     if not fm.get("summary"):
@@ -89,8 +210,8 @@ def check_note(note_path, vault_path, md_files):
             "msg": "Missing `summary:` frontmatter (1-3 sentence TLDR)",
         })
 
-    # Check 2: Long note missing ## Summary H2
-    if wc >= LONG_NOTE_WORDS:
+    # Check 2: Long note missing ## Summary H2 (atomic/knowledge notes only — not session/structured records)
+    if wc >= LONG_NOTE_WORDS and note_type not in STRUCTURED_TYPES:
         first_h2 = h2s[0][0] if h2s else None
         if not first_h2 or slugify(first_h2) != "summary":
             warnings.append({
@@ -99,8 +220,8 @@ def check_note(note_path, vault_path, md_files):
                 "msg": f"Note has {wc} words but no `## Summary` as first H2",
             })
 
-    # Check 3: Atomic ceiling
-    if len(h2s) > ATOMIC_MAX_H2 or wc > ATOMIC_MAX_WORDS:
+    # Check 3: Atomic ceiling (atomic/knowledge notes only — logs/backlogs/specs are structured records)
+    if note_type not in STRUCTURED_TYPES and (len(h2s) > ATOMIC_MAX_H2 or wc > ATOMIC_MAX_WORDS):
         warnings.append({
             "rule": "atomic-ceiling-exceeded",
             "severity": "warning",
@@ -175,6 +296,11 @@ def check_note(note_path, vault_path, md_files):
                 "msg": f"Heading slug '{slug}' appears {len(entries)} times: "
                        f"{', '.join(t for _, t in entries)}",
             })
+
+    # Item-schema checks (board state enforcement — type: item only)
+    if fm.get("type") == "item":
+        warnings.extend(check_item_schema(fm))
+        warnings.extend(check_item_readfirst(body))
 
     for w in warnings:
         w["file_path"] = rel_path
